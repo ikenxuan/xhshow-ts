@@ -1,0 +1,53 @@
+{
+  "name": "@ikenxuan/xhshow-ts",
+  "version": "1.0.0",
+  "description": "XHS API signature generator",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.mjs",
+  "types": "dist/esm/index.d.ts",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ikenxuan/xhshow-ts.git"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist/*",
+    "LICENSE",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx watch src/dev.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "xhs",
+    "signature",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "24.7.0",
+    "axios": "npm:@karinjs/axios@^1.2.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "zod": "^4.1.12"
+  }
+}

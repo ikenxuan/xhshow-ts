@@ -1,0 +1,23 @@
+# Logs
+*.log
+npm-debug.log*
+
+node_modules
+dist/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# lock files
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# other
+src/dev.ts
