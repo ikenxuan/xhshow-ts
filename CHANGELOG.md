@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.0...v1.0.1) (2025-12-07)
+
+
+### 🐛 错误修复
+
+* 更新算法版本4.86.0 ([c7014bb](https://github.com/ikenxuan/xhshow-ts/commit/c7014bbd10e6abd0501128ac1a1f6f504519a0c9))
+
 ## 1.0.0 (2025-10-08)
 
 
