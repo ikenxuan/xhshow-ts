@@ -2,7 +2,7 @@
 
 <div align="center">
 
-小红书请求签名生成库的 TypeScript 版本，支持 GET 和 POST 请求的 x-s 签名生成。
+小红书请求签名生成库的 TypeScript 实现，支持 GET/POST 请求的 x-s 和 x-s-common 签名。本 Fork 代码由 AI 生成，仅供个人使用，不保证与上游仓库行为一致。
 
 </div>
 
@@ -51,6 +51,21 @@ const postSignature = client.signXsPost(
   "xhs-pc-web",
   { username: "test", password: "123456" }
 )
+
+// x-s-common 签名
+const xsCommon = client.signXsc({
+  a1: "your_a1_cookie_value",
+  web_session: "your_web_session"
+})
+
+// 一次性生成所有请求头
+const headers = client.signHeadersGet(
+  "/api/sns/web/v1/user_posted",
+  { a1: "your_a1_cookie_value", web_session: "..." },
+  "xhs-pc-web",
+  { num: "30" }
+)
+// headers 包含: x-s, x-s-common, x-t, x-b3-traceid, x-xray-traceid
 ```
 
 ### CommonJS
@@ -90,33 +105,72 @@ const signature = client.signXs(
 
 ### Xhshow 类
 
-#### `signXs(method, uri, a1Value, xsecAppid?, payload?)`
+#### `signXs(method, uri, a1Value, xsecAppid?, payload?, timestamp?)`
 
 通用签名方法
 
 - `method`: `'GET' | 'POST'` - 请求方法
-- `uri`: `string` - 请求URI（去除域名和查询参数）
+- `uri`: `string` - 请求URI（支持完整URL或仅路径）
 - `a1Value`: `string` - cookie中的a1值
 - `xsecAppid`: `string` - 应用标识符，默认为 `'xhs-pc-web'`
 - `payload`: `Record<string, any> | null` - 请求参数
+- `timestamp`: `number` - Unix时间戳（秒），默认为当前时间
 
-#### `signXsGet(uri, a1Value, xsecAppid?, params?)`
+#### `signXsGet(uri, a1Value, xsecAppid?, params?, timestamp?)`
 
 GET请求专用签名方法
 
-- `uri`: `string` - 请求URI
-- `a1Value`: `string` - cookie中的a1值  
-- `xsecAppid`: `string` - 应用标识符，默认为 `'xhs-pc-web'`
-- `params`: `Record<string, any> | null` - GET请求参数
-
-#### `signXsPost(uri, a1Value, xsecAppid?, payload?)`
+#### `signXsPost(uri, a1Value, xsecAppid?, payload?, timestamp?)`
 
 POST请求专用签名方法
 
-- `uri`: `string` - 请求URI
-- `a1Value`: `string` - cookie中的a1值
-- `xsecAppid`: `string` - 应用标识符，默认为 `'xhs-pc-web'`
-- `payload`: `Record<string, any> | null` - POST请求体数据
+#### `signXsCommon(cookieDict)` / `signXsc(cookieDict)`
+
+生成 x-s-common 签名
+
+- `cookieDict`: `Record<string, any> | string` - 完整的cookie字典或cookie字符串
+
+#### `signHeaders(method, uri, cookies, xsecAppid?, params?, payload?, timestamp?)`
+
+一次性生成完整的请求头
+
+- 返回包含 `x-s`, `x-s-common`, `x-t`, `x-b3-traceid`, `x-xray-traceid` 的对象
+
+#### `signHeadersGet(uri, cookies, xsecAppid?, params?, timestamp?)`
+
+GET请求专用的完整请求头生成方法
+
+#### `signHeadersPost(uri, cookies, xsecAppid?, payload?, timestamp?)`
+
+POST请求专用的完整请求头生成方法
+
+#### `decodeXs(xsSignature)`
+
+解密完整的 XYS 签名
+
+#### `decodeX3(x3Signature)`
+
+解密 x3 签名
+
+#### `buildUrl(baseUrl, params?)`
+
+构建带查询参数的完整URL
+
+#### `buildJsonBody(payload)`
+
+构建POST请求的JSON body字符串
+
+#### `getB3TraceId()`
+
+生成 x-b3-traceid
+
+#### `getXrayTraceId(timestamp?, seq?)`
+
+生成 x-xray-traceid
+
+#### `getXT(timestamp?)`
+
+生成 x-t 头部值（毫秒时间戳）
 
 ## 类型定义
 
@@ -125,9 +179,21 @@ type Method = 'GET' | 'POST'
 type Payload = Record<string, any> | null
 
 class Xhshow {
-  signXs(method: Method, uri: string, a1Value: string, xsecAppid?: string, payload?: Payload): string
-  signXsGet(uri: string, a1Value: string, xsecAppid?: string, params?: Payload): string
-  signXsPost(uri: string, a1Value: string, xsecAppid?: string, payload?: Payload): string
+  signXs(method: Method, uri: string, a1Value: string, xsecAppid?: string, payload?: Payload, timestamp?: number): string
+  signXsGet(uri: string, a1Value: string, xsecAppid?: string, params?: Payload, timestamp?: number): string
+  signXsPost(uri: string, a1Value: string, xsecAppid?: string, payload?: Payload, timestamp?: number): string
+  signXsCommon(cookieDict: Record<string, any> | string): string
+  signXsc(cookieDict: Record<string, any> | string): string
+  signHeaders(method: Method, uri: string, cookies: Record<string, any> | string, xsecAppid?: string, params?: Payload, payload?: Payload, timestamp?: number): Record<string, string>
+  signHeadersGet(uri: string, cookies: Record<string, any> | string, xsecAppid?: string, params?: Payload, timestamp?: number): Record<string, string>
+  signHeadersPost(uri: string, cookies: Record<string, any> | string, xsecAppid?: string, payload?: Payload, timestamp?: number): Record<string, string>
+  decodeXs(xsSignature: string): Record<string, any>
+  decodeX3(x3Signature: string): Uint8Array
+  buildUrl(baseUrl: string, params?: Record<string, any> | null): string
+  buildJsonBody(payload: Record<string, any>): string
+  getB3TraceId(): string
+  getXrayTraceId(timestamp?: number, seq?: number): string
+  getXT(timestamp?: number): number
 }
 ```
 
@@ -152,9 +218,6 @@ npm run dev
 
 # 构建项目
 npm run build
-
-# 运行测试（如果有）
-npm test
 ```
 
 ### 项目结构
@@ -163,10 +226,15 @@ npm test
 src/
 ├── client.ts          # 主要客户端类
 ├── core/              # 核心加密处理
+│   ├── crypto.ts      # 加密处理器
+│   ├── commonSign.ts  # x-s-common 签名
+│   └── crc32.ts       # CRC32 实现
 ├── config/            # 配置文件
+├── data/              # 指纹数据
+├── generators/        # 指纹生成器
 ├── utils/             # 工具函数
 ├── validators.ts      # 参数验证
-└── index.ts          # 入口文件
+└── index.ts           # 入口文件
 ```
 
 ## License

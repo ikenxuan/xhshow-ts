@@ -3,8 +3,8 @@ import { CryptoConfig } from '../config'
 export class BitOperations {
   private config: CryptoConfig
 
-  constructor () {
-    this.config = new CryptoConfig()
+  constructor (config?: CryptoConfig) {
+    this.config = config || new CryptoConfig()
   }
 
   normalizeTo32bit (value: number): number {
@@ -27,17 +27,22 @@ export class BitOperations {
     const shift10Bits = normalizedSeed >> 10
 
     const xorMaskedResult = (shift15Bits & ~shift13Bits) | (shift13Bits & ~shift15Bits)
-    const shiftedResult = (xorMaskedResult ^ shift12Bits ^ shift10Bits) << 31 & this.config.MAX_32BIT
+    const shiftedResult = ((xorMaskedResult ^ shift12Bits ^ shift10Bits) << 31) & this.config.MAX_32BIT
 
     return this.toSigned32bit(shiftedResult)
   }
 
   xorTransformArray (sourceIntegers: number[]): Uint8Array {
     const result = new Uint8Array(sourceIntegers.length)
-    const keyBuffer = Buffer.from(this.config.HEX_KEY, 'hex')
+    const keyBytes = Buffer.from(this.config.HEX_KEY, 'hex')
+    const keyLength = keyBytes.length
 
     for (let i = 0; i < sourceIntegers.length; i++) {
-      result[i] = (sourceIntegers[i] ^ keyBuffer[i % keyBuffer.length]) & 0xFF
+      if (i < keyLength) {
+        result[i] = (sourceIntegers[i] ^ keyBytes[i]) & 0xFF
+      } else {
+        result[i] = sourceIntegers[i] & 0xFF
+      }
     }
 
     return result
