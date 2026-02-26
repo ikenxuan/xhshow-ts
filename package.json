@@ -31,7 +31,6 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsx watch src/dev.ts",
-    "prepublishOnly": "npm run build",
     "pub": "npm publish --access public"
   },
   "keywords": [
