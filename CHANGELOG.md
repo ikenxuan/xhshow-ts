@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.1...v1.0.2) (2026-02-26)
+
+
+### 🐛 错误修复
+
+* 同步上游，更新算法实现 ([358017a](https://github.com/ikenxuan/xhshow-ts/commit/358017aceb73f85270fc7868cd94d9eaef099228))
+
 ## [1.0.1](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.0...v1.0.1) (2025-12-07)
 
 
