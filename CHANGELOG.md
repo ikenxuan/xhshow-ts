@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.2...v1.0.3) (2026-02-26)
+
+
+### 🐛 错误修复
+
+* 迁移到tsdown，修复ci ([69616b8](https://github.com/ikenxuan/xhshow-ts/commit/69616b8d48650d5a2a3936273162ee549ef0c2d3))
+
 ## [1.0.2](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.1...v1.0.2) (2026-02-26)
 
 
