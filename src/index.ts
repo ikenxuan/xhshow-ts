@@ -7,13 +7,3 @@ export type { Fingerprint } from './generators'
 export type { SignState } from './session'
 export * from './utils'
 export type { Method, Payload } from './validators'
-
-import { Xhshow } from './client'
-import { CryptoProcessor } from './core'
-import { SessionManager } from './session'
-
-export default {
-  Xhshow,
-  CryptoProcessor,
-  SessionManager
-}

@@ -78,6 +78,9 @@ jobs:
   npm-production-publish:
     runs-on: ubuntu-latest
     needs: [version-release, production-build]
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - name: 📥 下载构建产物
         uses: actions/download-artifact@v4
@@ -87,18 +90,7 @@ jobs:
 
       - name: 🚀 发布到 NPM 官方源
         id: publish-to-npm
-        uses: JS-DevTools/npm-publish@v3
-        with:
-          token: ${{ secrets.NPM_TOKEN }}
-          registry: https://registry.npmjs.org/
-          access: public
-          provenance: true
-
-      - name: 📊 生成发布报告
-        run: |
-          echo "## 📦 发布信息" >> $GITHUB_STEP_SUMMARY
-          echo "包名: \`${{ steps.publish-to-npm.outputs.name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "版本号: \`${{ steps.publish-to-npm.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+        run: pnpm publish --no-git-checks --provenance
 
   # 镜像源同步
   npm-mirror-sync:
