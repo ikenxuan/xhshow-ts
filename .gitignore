@@ -15,9 +15,6 @@ dist/
 Thumbs.db
 
 # lock files
-pnpm-lock.yaml
-package-lock.json
-yarn.lock
 skills-lock.json
 
 # other
