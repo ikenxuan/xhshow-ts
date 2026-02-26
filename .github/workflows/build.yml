@@ -82,6 +82,17 @@ jobs:
       contents: write
       id-token: write
     steps:
+      - name: � 配置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: � 配置 PNPM 环境
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.13.2
+
       - name: 📥 下载构建产物
         uses: actions/download-artifact@v4
         with:
