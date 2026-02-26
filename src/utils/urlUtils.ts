@@ -1,4 +1,30 @@
 /**
+ * Extract pure API path from URI (removes query params and JSON body)
+ *
+ * @param uriWithData - URI that may contain query params or JSON body
+ * @returns Pure API path without params or body
+ *
+ * @example
+ * extractApiPath('/api/homefeed{"num":47}') // '/api/homefeed'
+ * extractApiPath('/api/homefeed?num=47') // '/api/homefeed'
+ * extractApiPath('/api/homefeed') // '/api/homefeed'
+ */
+export function extractApiPath (uriWithData: string): string {
+  const bracePos = uriWithData.indexOf('{')
+  const questionPos = uriWithData.indexOf('?')
+
+  if (bracePos !== -1 && questionPos !== -1) {
+    return uriWithData.substring(0, Math.min(bracePos, questionPos))
+  } else if (bracePos !== -1) {
+    return uriWithData.substring(0, bracePos)
+  } else if (questionPos !== -1) {
+    return uriWithData.substring(0, questionPos)
+  } else {
+    return uriWithData
+  }
+}
+
+/**
  * Extract URI path from full URL (removes protocol, host, query, fragment)
  */
 export function extractUri (url: string): string {

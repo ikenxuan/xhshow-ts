@@ -79,6 +79,41 @@ const headers = client.signHeadersGet(
 // headers 包含: x-s, x-s-common, x-t, x-b3-traceid, x-xray-traceid
 ```
 
+### 使用会话管理（推荐）
+
+会话管理器可以模拟真实用户在同一页面中的连续操作，生成更真实的签名，提高长期稳定性：
+
+```typescript
+import { Xhshow, SessionManager } from '@ikenxuan/xhshow-ts'
+
+const client = new Xhshow()
+const session = new SessionManager()
+
+// 使用会话管理器进行多次请求
+const headers1 = client.signHeadersGet(
+  '/api/sns/web/v1/user_posted',
+  { a1: 'your_a1_cookie_value', web_session: '...' },
+  'xhs-pc-web',
+  { num: '30' },
+  undefined,
+  session  // 传入会话管理器
+)
+
+// 第二次请求，会话状态会自动更新
+const headers2 = client.signHeadersGet(
+  '/api/sns/web/v1/user_posted',
+  { a1: 'your_a1_cookie_value', web_session: '...' },
+  'xhs-pc-web',
+  { num: '30', cursor: 'next_page' },
+  undefined,
+  session  // 使用同一个会话管理器
+)
+
+// 会话管理器的工作原理：
+// - 无 Session：每次请求生成随机参数，可能被识别为机器人
+// - 有 Session：维护固定的页面加载时间戳和单调递增的计数器，模拟真实用户行为
+```
+
 ### CommonJS
 
 ```javascript
@@ -100,18 +135,26 @@ const getSignature = client.signXsGet(
 
 | 方法 | 说明 |
 |------|------|
-| `signXs(method, uri, a1Value, xsecAppid?, payload?, timestamp?)` | 通用签名 |
-| `signXsGet(uri, a1Value, xsecAppid?, params?, timestamp?)` | GET 请求签名 |
-| `signXsPost(uri, a1Value, xsecAppid?, payload?, timestamp?)` | POST 请求签名 |
+| `signXs(method, uri, a1Value, xsecAppid?, payload?, timestamp?, session?)` | 通用签名 |
+| `signXsGet(uri, a1Value, xsecAppid?, params?, timestamp?, session?)` | GET 请求签名 |
+| `signXsPost(uri, a1Value, xsecAppid?, payload?, timestamp?, session?)` | POST 请求签名 |
 | `signXsc(cookieDict)` | 生成 x-s-common 签名 |
 
 ### 请求头生成
 
 | 方法 | 说明 |
 |------|------|
-| `signHeaders(method, uri, cookies, ...)` | 生成完整请求头 |
-| `signHeadersGet(uri, cookies, ...)` | GET 请求头 |
-| `signHeadersPost(uri, cookies, ...)` | POST 请求头 |
+| `signHeaders(method, uri, cookies, xsecAppid?, params?, payload?, timestamp?, session?)` | 生成完整请求头 |
+| `signHeadersGet(uri, cookies, xsecAppid?, params?, timestamp?, session?)` | GET 请求头 |
+| `signHeadersPost(uri, cookies, xsecAppid?, payload?, timestamp?, session?)` | POST 请求头 |
+
+### 会话管理
+
+| 类/方法 | 说明 |
+|------|------|
+| `SessionManager` | 会话管理器类 |
+| `session.getCurrentState(uri)` | 获取当前签名状态 |
+| `session.updateState()` | 更新会话状态 |
 
 ### 工具方法
 
@@ -131,14 +174,27 @@ const getSignature = client.signXsGet(
 type Method = 'GET' | 'POST'
 type Payload = Record<string, any> | null
 
+interface SignState {
+  pageLoadTimestamp: number
+  sequenceValue: number
+  windowPropsLength: number
+  uriLength: number
+}
+
+class SessionManager {
+  constructor(config?: CryptoConfig)
+  updateState(): void
+  getCurrentState(uri: string): SignState
+}
+
 interface Xhshow {
-  signXs(method: Method, uri: string, a1Value: string, xsecAppid?: string, payload?: Payload, timestamp?: number): string
-  signXsGet(uri: string, a1Value: string, xsecAppid?: string, params?: Payload, timestamp?: number): string
-  signXsPost(uri: string, a1Value: string, xsecAppid?: string, payload?: Payload, timestamp?: number): string
+  signXs(method: Method, uri: string, a1Value: string, xsecAppid?: string, payload?: Payload, timestamp?: number, session?: SessionManager): string
+  signXsGet(uri: string, a1Value: string, xsecAppid?: string, params?: Payload, timestamp?: number, session?: SessionManager): string
+  signXsPost(uri: string, a1Value: string, xsecAppid?: string, payload?: Payload, timestamp?: number, session?: SessionManager): string
   signXsc(cookieDict: Record<string, any> | string): string
-  signHeaders(method: Method, uri: string, cookies: Record<string, any> | string, xsecAppid?: string, params?: Payload, payload?: Payload, timestamp?: number): Record<string, string>
-  signHeadersGet(uri: string, cookies: Record<string, any> | string, xsecAppid?: string, params?: Payload, timestamp?: number): Record<string, string>
-  signHeadersPost(uri: string, cookies: Record<string, any> | string, xsecAppid?: string, payload?: Payload, timestamp?: number): Record<string, string>
+  signHeaders(method: Method, uri: string, cookies: Record<string, any> | string, xsecAppid?: string, params?: Payload, payload?: Payload, timestamp?: number, session?: SessionManager): Record<string, string>
+  signHeadersGet(uri: string, cookies: Record<string, any> | string, xsecAppid?: string, params?: Payload, timestamp?: number, session?: SessionManager): Record<string, string>
+  signHeadersPost(uri: string, cookies: Record<string, any> | string, xsecAppid?: string, payload?: Payload, timestamp?: number, session?: SessionManager): Record<string, string>
   decodeXs(xsSignature: string): Record<string, any>
   decodeX3(x3Signature: string): Uint8Array
   buildUrl(baseUrl: string, params?: Record<string, any> | null): string
@@ -171,6 +227,7 @@ pnpm build
 ```
 src/
 ├── client.ts          # 主客户端类
+├── session.ts         # 会话管理器
 ├── core/              # 核心加密处理
 ├── config/            # 配置
 ├── data/              # 指纹数据

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { CryptoConfig } from './config'
 import { CryptoProcessor, XsCommonSigner } from './core'
 import { RandomGenerator, extractUri, buildUrl } from './utils'
+import { SessionManager, type SignState } from './session'
 import {
   validateSignatureParams,
   validateGetSignatureParams,
@@ -75,6 +76,7 @@ export class Xhshow {
    * @param xsecAppid - 应用 ID，默认为 'xhs-pc-web'
    * @param stringParam - 字符串参数
    * @param timestamp - 可选的时间戳
+   * @param signState - 可选的签名状态（用于会话管理）
    * @returns 编码后的签名字符串
    */
   private buildSignature (
@@ -82,18 +84,20 @@ export class Xhshow {
     a1Value: string,
     xsecAppid: string = 'xhs-pc-web',
     stringParam: string = '',
-    timestamp?: number
+    timestamp?: number,
+    signState?: SignState
   ): string {
     const payloadArray = this.cryptoProcessor.buildPayloadArray(
       dValue,
       a1Value,
       xsecAppid,
       stringParam,
-      timestamp
+      timestamp,
+      signState
     )
 
     const xorResult = this.cryptoProcessor.bitOps.xorTransformArray(payloadArray)
-    return this.cryptoProcessor.b64encoder.encodeX3(xorResult.subarray(0, 124))
+    return this.cryptoProcessor.b64encoder.encodeX3(xorResult.subarray(0, this.config.PAYLOAD_LENGTH))
   }
 
   /**
@@ -104,6 +108,7 @@ export class Xhshow {
    * @param xsecAppid - 应用 ID，默认为 'xhs-pc-web'
    * @param payload - GET 请求的查询参数或 POST 请求的请求体
    * @param timestamp - 可选的时间戳（秒），不传则使用当前时间
+   * @param session - 可选的会话管理器，用于生成更真实的签名
    * @returns x-s 签名字符串
    */
   signXs (
@@ -112,7 +117,8 @@ export class Xhshow {
     a1Value: string,
     xsecAppid: string = 'xhs-pc-web',
     payload: Payload = null,
-    timestamp?: number
+    timestamp?: number,
+    session?: SessionManager
   ): string {
     validateSignatureParams(method, uri, a1Value)
 
@@ -122,8 +128,10 @@ export class Xhshow {
     const contentString = this.buildContentString(method, uri, payload)
     const dValue = this.generateDValue(contentString)
 
+    const signState = session ? session.getCurrentState(uri) : undefined
+
     signatureData.x3 = this.config.X3_PREFIX +
-      this.buildSignature(dValue, a1Value, xsecAppid, contentString, timestamp)
+      this.buildSignature(dValue, a1Value, xsecAppid, contentString, timestamp, signState)
 
     const jsonStr = JSON.stringify(signatureData)
     return this.config.XYS_PREFIX + this.cryptoProcessor.b64encoder.encode(jsonStr)
@@ -147,6 +155,7 @@ export class Xhshow {
    * @param xsecAppid - 应用 ID，默认为 'xhs-pc-web'
    * @param params - 查询参数对象
    * @param timestamp - 可选的时间戳（秒）
+   * @param session - 可选的会话管理器
    * @returns x-s 签名字符串
    */
   signXsGet (
@@ -154,10 +163,11 @@ export class Xhshow {
     a1Value: string,
     xsecAppid: string = 'xhs-pc-web',
     params: Payload = null,
-    timestamp?: number
+    timestamp?: number,
+    session?: SessionManager
   ): string {
     validateGetSignatureParams(uri, a1Value)
-    return this.signXs('GET', uri, a1Value, xsecAppid, params, timestamp)
+    return this.signXs('GET', uri, a1Value, xsecAppid, params, timestamp, session)
   }
 
   /**
@@ -167,6 +177,7 @@ export class Xhshow {
    * @param xsecAppid - 应用 ID，默认为 'xhs-pc-web'
    * @param payload - 请求体对象
    * @param timestamp - 可选的时间戳（秒）
+   * @param session - 可选的会话管理器
    * @returns x-s 签名字符串
    */
   signXsPost (
@@ -174,10 +185,11 @@ export class Xhshow {
     a1Value: string,
     xsecAppid: string = 'xhs-pc-web',
     payload: Payload = null,
-    timestamp?: number
+    timestamp?: number,
+    session?: SessionManager
   ): string {
     validatePostSignatureParams(uri, a1Value)
-    return this.signXs('POST', uri, a1Value, xsecAppid, payload, timestamp)
+    return this.signXs('POST', uri, a1Value, xsecAppid, payload, timestamp, session)
   }
 
   /**
@@ -304,6 +316,7 @@ export class Xhshow {
    * @param params - GET 请求的查询参数（POST 请求时不可用）
    * @param payload - POST 请求的请求体（GET 请求时不可用）
    * @param timestamp - 可选的时间戳（秒）
+   * @param session - 可选的会话管理器
    * @returns 包含 x-s、x-s-common、x-t、x-b3-traceid、x-xray-traceid 的请求头对象
    * @throws 如果 GET 请求使用 payload 或 POST 请求使用 params 则抛出错误
    * @throws 如果 cookies 中缺少 a1 则抛出错误
@@ -315,7 +328,8 @@ export class Xhshow {
     xsecAppid: string = 'xhs-pc-web',
     params?: Record<string, any> | null,
     payload?: Record<string, any> | null,
-    timestamp?: number
+    timestamp?: number,
+    session?: SessionManager
   ): Record<string, string> {
     if (timestamp === undefined) {
       timestamp = Date.now() / 1000
@@ -346,7 +360,7 @@ export class Xhshow {
       throw new Error("Missing 'a1' in cookies")
     }
 
-    const xS = this.signXs(methodUpper, uri, a1Value, xsecAppid, requestData, timestamp)
+    const xS = this.signXs(methodUpper, uri, a1Value, xsecAppid, requestData, timestamp, session)
     const xSCommon = this.signXsCommon(cookieDict)
     const xT = this.getXT(timestamp)
     const xB3Traceid = this.getB3TraceId()
@@ -368,6 +382,7 @@ export class Xhshow {
    * @param xsecAppid - 应用 ID，默认为 'xhs-pc-web'
    * @param params - 查询参数对象
    * @param timestamp - 可选的时间戳（秒）
+   * @param session - 可选的会话管理器
    * @returns 包含签名和追踪 ID 的请求头对象
    */
   signHeadersGet (
@@ -375,9 +390,10 @@ export class Xhshow {
     cookies: Record<string, any> | string,
     xsecAppid: string = 'xhs-pc-web',
     params?: Record<string, any> | null,
-    timestamp?: number
+    timestamp?: number,
+    session?: SessionManager
   ): Record<string, string> {
-    return this.signHeaders('GET', uri, cookies, xsecAppid, params, undefined, timestamp)
+    return this.signHeaders('GET', uri, cookies, xsecAppid, params, undefined, timestamp, session)
   }
 
   /**
@@ -387,6 +403,7 @@ export class Xhshow {
    * @param xsecAppid - 应用 ID，默认为 'xhs-pc-web'
    * @param payload - 请求体对象
    * @param timestamp - 可选的时间戳（秒）
+   * @param session - 可选的会话管理器
    * @returns 包含签名和追踪 ID 的请求头对象
    */
   signHeadersPost (
@@ -394,8 +411,9 @@ export class Xhshow {
     cookies: Record<string, any> | string,
     xsecAppid: string = 'xhs-pc-web',
     payload?: Record<string, any> | null,
-    timestamp?: number
+    timestamp?: number,
+    session?: SessionManager
   ): Record<string, string> {
-    return this.signHeaders('POST', uri, cookies, xsecAppid, undefined, payload, timestamp)
+    return this.signHeaders('POST', uri, cookies, xsecAppid, undefined, payload, timestamp, session)
   }
 }
