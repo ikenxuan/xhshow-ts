@@ -88,10 +88,8 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
-      - name: � 配置 PNPM 环境
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.13.2
+      - name: 📦 更新 NPM 到最新版本
+        run: npm install -g npm@latest
 
       - name: 📥 下载构建产物
         uses: actions/download-artifact@v4
@@ -101,7 +99,7 @@ jobs:
 
       - name: 🚀 发布到 NPM 官方源
         id: publish-to-npm
-        run: pnpm publish --no-git-checks --provenance
+        run: npm publish --provenance --access public
 
   # 镜像源同步
   npm-mirror-sync:
