@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.5](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.4...v1.0.5) (2026-02-26)
+
+
+### 🐛 错误修复
+
+* ci ([09574bc](https://github.com/ikenxuan/xhshow-ts/commit/09574bc3d579904ee6a8aeaff5ad32dce1954f57))
+
 ## [1.0.4](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.3...v1.0.4) (2026-02-26)
 
 
