@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.6...v1.1.0) (2026-09-19)
+
+
+### ✨ 新功能
+
+* Add XYW and XRAP cryptography support ([82f5639](https://github.com/ikenxuan/xhshow-ts/commit/82f56395018647b76745ba32da3976e5ad785c7a))
+
+
+### 🐛 错误修复
+
+* ci ([2c760ad](https://github.com/ikenxuan/xhshow-ts/commit/2c760adf75a9eb29b15e96b28dc49428c4c6ff55))
+
 ## [1.0.6](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.5...v1.0.6) (2026-02-26)
 
 
