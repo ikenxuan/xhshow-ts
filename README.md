@@ -127,6 +127,37 @@ const headers = client.signHeadersPost(
 // headers 额外包含 x-rap-param
 ```
 
+### 签名默认值与会话时间
+
+根据 2026-09-25 的浏览器抓包记录，默认 `x-s-common` 使用 `x1=4.4.3`、
+`x4=6.56.3`（Cookie 里有 `webBuild` 时以 Cookie 为准），`x-rap-param` 使用 SDK 协议版本 `10301`。
+
+`x-s-common` 的 `x12` 格式为 `请求时间戳;会话起始时间戳`（毫秒）。第一段在每次
+生成签名时刷新；第二段默认使用模块加载时间，同一模块的多个客户端实例共享此值。
+这是无法获知 Cookie 实际创建时间时的回退值，与 `SessionManager` 的状态独立。
+
+如需使用调用方管理的会话起始时间，可保留动态 getter 覆盖模板。只展开模板会把
+`x12` 求值为当前字符串，因此自定义模板时应重新定义 getter，避免冻结请求时间：
+
+```typescript
+import { CryptoConfig, Xhshow } from '@ikenxuan/xhshow-ts'
+
+const defaults = new CryptoConfig()
+const sessionStartMs = Date.now() // 替换为调用方保存的会话起始时间
+const config = defaults.withOverrides({
+  SIGNATURE_XSCOMMON_TEMPLATE: {
+    ...defaults.SIGNATURE_XSCOMMON_TEMPLATE,
+    get x12 () {
+      return `${Date.now()};${sessionStartMs}`
+    }
+  }
+})
+const client = new Xhshow(config)
+```
+
+直接调用 `xRapParam(api, data, { sdkVersion })` 仍可覆盖 XRAP 协议版本。签名默认值
+更新后需重新执行 `pnpm build`；包的 ESM/CJS 入口均从 `dist` 加载构建产物。
+
 ### 生成 Cookie 与辅助参数
 
 ```typescript
@@ -174,6 +205,72 @@ const headers2 = client.signHeadersGet(
 // - 有 Session：维护固定的页面加载时间戳和单调递增的计数器，模拟真实用户行为
 ```
 
+### XYS 字段（x4~x7）与会话 SSK
+
+`signXs` 按前端 `seccore_signv2` 输出 `x0~x5`，会话带 webSsk 时再加 `x6/x7`：
+
+| 字段 | 含义 |
+|------|------|
+| `x0` / `x1` / `x2` | 签名版本 `4.4.3` / 应用 ID / 平台名（随 `forUserAgent` 变） |
+| `x3` | mnsv2 签名（`mns0301_` 档位，明文布局见下） |
+| `x4` | 请求体类型：POST 为 `'object'`，GET 为 `''` |
+| `x5` | 签名内容串（URI + 查询串或 JSON 请求体）的 MD5 |
+| `x6` / `x7` | 会话 SSK 证明，按 appId 分键：`x7 = nonce(4) ‖ sha1(ssk ‖ nonce) ‖ ssk[32:]`，`x6 = sha1(md5 ‖ x7)` |
+
+x4~x7 已与页面自己签出的 21 条 `XYS_` 逐字节核对一致；登录态下
+homefeed、评论翻页、子评论在带与不带 x4~x7 时均正常返回。服务端目前不强制 x6/x7。
+
+x3 解密后是 144 字节明文，2026-09-26 与页面签出的 20 条 x3 逐字段核对：内容 MD5 段为
+`md5(内容)[0:8]`，a3 段为 `dsf(le64(时间戳) ‖ md5(URI))`，两者都逐字节异或版本字段的低字节；
+env 尾部取页面稳定后的值。页面刚加载的约 1 秒里会先用 `mns0201_` / `mns0101_` 档位，
+这里只生成稳定后的 `mns0301_`。
+
+SSK 可以直接从浏览器 `localStorage.getItem('webSsk')` 复制：
+
+```typescript
+import { SessionManager, Xhshow } from '@ikenxuan/xhshow-ts'
+
+const session = new SessionManager(undefined, { webSsk: '{"xhs-pc-web":"..."}' })
+const headers = client.signHeadersPost('/api/sns/web/v1/homefeed', cookies, 'xhs-pc-web', body, undefined, session)
+```
+
+也可以在登录时自己换一份。前端只在登录类接口（`SSK_ISSUE_APIS`：扫码状态、验证码登录等）
+的请求里带上客户端公钥，游客会话和已登录会话调 `login/activate` 都不会下发：
+
+```typescript
+import { CryptoConfig, createWebSskExchange, extractEncryptedSsk } from '@ikenxuan/xhshow-ts'
+
+const exchange = createWebSskExchange(new CryptoConfig().SSK_SERVER_PUBLIC_KEY)
+// POST 放进请求体，GET 放进同名 query 参数
+const res = await post('/api/sns/web/v1/login/qrcode/status', { ...body, clientPublicKeyBase64: exchange.clientPublicKeyBase64 })
+const encrypted = extractEncryptedSsk(res)
+if (encrypted) session.setWebSsk({ 'xhs-pc-web': exchange.acceptEncryptedSsk(encrypted) })
+```
+
+### 浏览器搜索网关（bws）
+
+`bws.xiaohongshu.com` 上的浏览器搜索与加密 ID 解密接口**不需要签名和 Cookie**，
+但有两个必填、缺了只会报笼统错误的字段，这里提供请求体构造：
+
+```typescript
+import {
+  BWS_BASE_URL, BWS_SEARCH_PATH, BWS_RESOURCE_DECRYPT_PATH,
+  buildBrowserSearchBody, buildBrowserSearchHeaders, buildResourceDecryptBody
+} from '@ikenxuan/xhshow-ts'
+
+// 请求体自动带上 xhsBrowserChannel（缺了回 code -1「内部错误」）
+const body = buildBrowserSearchBody({ keyword: '咖啡', page: 1 })
+const res = await fetch(BWS_BASE_URL + BWS_SEARCH_PATH, {
+  method: 'POST', headers: { ...buildBrowserSearchHeaders(), 'user-agent': ua }, body: JSON.stringify(body)
+})
+
+// 搜索结果里的 note.id / note.user.userid 是 46 位加密串，解开后是 24 位 hex；
+// 请求体必须带 resourceType（缺了回 HTTP 400），取值不影响结果
+const decryptBody = buildResourceDecryptBody(encryptedId)
+```
+
+注意 user-agent 不能是空串（HTTP 461），可用 `isBlockedByBwsGateway(ua)` 自查。
+
 ### CommonJS
 
 ```javascript
@@ -220,9 +317,23 @@ const getSignature = client.signXsGet(
 
 | 类/方法 | 说明 |
 |------|------|
-| `SessionManager` | 会话管理器类 |
+| `SessionManager` | 会话管理器类，`new SessionManager(config?, { webSsk? })` |
 | `session.getCurrentState(content)` | 获取当前签名状态 |
 | `session.updateState()` | 更新会话状态 |
+| `session.setWebSsk(webSsk)` | 替换会话 SSK（JSON 字符串或映射，传空清除） |
+
+### 会话 SSK 与浏览器搜索
+
+| 方法 | 说明 |
+|------|------|
+| `buildSskProof(contentMd5, webSsk, nonce?)` | 计算 x6/x7，没有可用 SSK 时返回 `null` |
+| `parseWebSsk(value)` | 把 localStorage 的 webSsk 统一成 appId → base64 映射 |
+| `createWebSskExchange(serverPublicKey)` | 发起一次 X25519 交换，返回客户端公钥与解密函数 |
+| `extractEncryptedSsk(response)` | 从登录类接口 / webprofile 响应里取 SSK 密文 |
+| `buildBrowserSearchBody(params)` | bws 浏览器搜索请求体 |
+| `buildResourceDecryptBody(resourceId, resourceType?)` | bws 加密 ID 解密请求体 |
+| `buildBrowserSearchHeaders()` | bws 请求头 |
+| `isBlockedByBwsGateway(ua)` | UA 是否会被 bws 网关拦截 |
 
 ### 工具方法
 
@@ -297,6 +408,12 @@ pnpm install
 
 # 开发模式
 pnpm dev
+
+# 回归测试
+pnpm test
+
+# 类型检查
+pnpm exec tsc --noEmit
 
 # 构建
 pnpm build

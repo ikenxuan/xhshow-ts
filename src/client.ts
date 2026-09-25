@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { CryptoConfig } from './config'
-import { CryptoProcessor, XsCommonSigner, buildXywPayloadHex, xRapParam } from './core'
+import { CryptoProcessor, XsCommonSigner, buildSskProof, buildXywPayloadHex, xRapParam } from './core'
 import { RandomGenerator, extractUri, buildUrl, getShardingKey } from './utils'
 import { SessionManager, type SignState } from './session'
 import {
@@ -105,13 +105,18 @@ export class Xhshow {
 
   /**
    * 生成请求签名（支持 GET 和 POST）
+   *
+   * 字段口径与前端 `seccore_signv2` 一致：x0~x2 取自模板，x3 为 mnsv2 签名，
+   * x4 为请求体类型（POST 为 `'object'`、GET 为 `''`），x5 为签名内容串的 MD5；
+   * 会话带 webSsk 时再加 x6/x7（会话 SSK 证明，见 {@link buildSskProof}）。
+   *
    * @param method - HTTP 请求方法，'GET' 或 'POST'
    * @param uri - 请求 URI 路径（可以是完整 URL，会自动提取路径部分）
    * @param a1Value - Cookie 中的 a1 值
    * @param xsecAppid - 应用 ID，默认为 'xhs-pc-web'
    * @param payload - GET 请求的查询参数或 POST 请求的请求体
    * @param timestamp - 可选的时间戳（秒），不传则使用当前时间
-   * @param session - 可选的会话管理器，用于生成更真实的签名
+   * @param session - 可选的会话管理器，用于生成更真实的签名；带 webSsk 时生成 x6/x7
    * @returns x-s 签名字符串
    */
   signXs (
@@ -127,7 +132,7 @@ export class Xhshow {
 
     uri = extractUri(uri)
 
-    const signatureData = { ...this.config.SIGNATURE_DATA_TEMPLATE }
+    const signatureData: Record<string, unknown> = { ...this.config.SIGNATURE_DATA_TEMPLATE }
     const contentString = this.buildContentString(method, uri, payload)
     const dValue = this.generateDValue(contentString)
     const mValue = method === 'GET'
@@ -138,6 +143,15 @@ export class Xhshow {
 
     signatureData.x3 = this.config.X3_PREFIX +
       this.buildSignature(dValue, mValue, a1Value, xsecAppid, contentString, timestamp, signState)
+    // 前端是 `data ? typeof data : ''`：POST 总带 JSON 请求体，GET 的参数在 URL 里
+    signatureData.x4 = method === 'POST' ? 'object' : ''
+    signatureData.x5 = dValue
+
+    const proof = session ? buildSskProof(dValue, session.webSsk) : null
+    if (proof) {
+      signatureData.x6 = proof.x6
+      signatureData.x7 = proof.x7
+    }
 
     const jsonStr = JSON.stringify(signatureData)
     return this.config.XYS_PREFIX + this.cryptoProcessor.b64encoder.encode(jsonStr)

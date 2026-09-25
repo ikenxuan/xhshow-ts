@@ -30,6 +30,7 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "test": "tsx --test tests/*.test.ts",
     "dev": "tsx watch src/dev.ts",
     "pub": "npm publish --access public"
   },

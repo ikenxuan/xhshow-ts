@@ -3,8 +3,14 @@
  *
  * Ported from the upstream Python `core/xrap.py`. Required for feed, search,
  * and note-publishing endpoints. Builds a TLV body structure, gzip-compresses
- * it, then XOR + block-encrypts (SM4-variant with custom S-box/round keys) and
- * wraps it in a base64 envelope.
+ * it, then XOR + block-encrypts and wraps it in a base64 envelope.
+ *
+ * 分组密码这一层此前被当成「换了 S 盒和轮密钥的 SM4 变体」，实际是**换了 S 盒的
+ * AES-128** —— 轮函数、T 表构造、ShiftRows、末轮置换都与 AES 一致，只换了那张
+ * 256 项代换表。据此 11 组轮密钥不必再抄成魔数：用 ASCII 主密钥
+ * `kqI1DTcwKX90ZtAy` 配合同一张 S 盒做标准 AES 密钥展开，可逐字复现
+ * SDK 里硬编码的全部 11 组（含末轮），见 {@link expandXrapKey}。
+ * 这样平台换密钥时只需替换 16 字节，而不是重新逆一遍常量池。
  */
 
 import { gzipSync } from 'node:zlib'
@@ -15,28 +21,6 @@ import { RandomGenerator } from '../utils/randomGen'
 const cfg = new CryptoConfig()
 const MASK_32 = cfg.MAX_32BIT
 const XRAP_SDK_VERSION = cfg.XRAP_SDK_VERSION
-
-// SM4-variant round keys (pre-expanded, 10 rounds)
-const ROUND_KEYS: ReadonlyArray<readonly [number, number, number, number]> = [
-  [0x6B714931, 0x44546377, 0x4B583930, 0x5A744179],
-  [0x89314C98, 0xCD652FEF, 0x863D16DF, 0xDC4957A6],
-  [0xC205330C, 0x0F601CE3, 0x895D0A3C, 0x55145D9A],
-  [0xD205006E, 0xDD651C8D, 0x543816B1, 0x012C4B2B],
-  [0x770C2B6F, 0xAA6937E2, 0xFE512153, 0xFF7D6A78],
-  [0x7866FBF4, 0xD20FCC16, 0x2C5EED45, 0xD323873D],
-  [0x90E9C67E, 0x42E60A68, 0x6EB8E72D, 0xBD9B6010],
-  [0xE9C52BEE, 0xAB232186, 0xC59BC6AB, 0x7800A6BB],
-  [0x13BA9A3E, 0xB899BBB8, 0x7D027D13, 0x0502DBA8],
-  [0x50613270, 0xE8F889C8, 0x95FAF4DB, 0x90F82F73]
-]
-const LAST_ROUND_KEY: readonly [number, number, number, number] = [0xF396B44F, 0x1B6E3D87, 0x8E94C95C, 0x1E6CE62F]
-const LAST_ROUND_KEY_BYTES = (() => {
-  const b = Buffer.alloc(16)
-  for (let i = 0; i < 4; i++) {
-    b.writeUInt32BE(LAST_ROUND_KEY[i] >>> 0, i * 4)
-  }
-  return b
-})()
 
 // Non-linear substitution box (256 entries)
 const SBOX = [
@@ -57,6 +41,52 @@ const SBOX = [
   0xA6, 0xFF, 0xF8, 0xBF, 0x5B, 0x5A, 0x0F, 0xE7, 0xC1, 0xBD, 0xD1, 0x66, 0xC5, 0x25, 0xEE, 0x8C,
   0xE2, 0x5F, 0x88, 0xA1, 0x3B, 0xA5, 0xF6, 0xCE, 0x95, 0x2F, 0x64, 0x23, 0xFB, 0xFD, 0x4F, 0x9B
 ]
+
+// --- 轮密钥：由主密钥经标准 AES-128 密钥展开推出，不再硬编码 ---
+
+/** AES 密钥展开的轮常量，前 10 轮。 */
+const RCON = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36]
+
+/**
+ * 用自定义 S 盒做标准 AES-128 密钥展开。
+ *
+ * 与教科书 AES 的唯一差别是 `SubWord` 查的是上面那张 {@link SBOX}。
+ * 对主密钥 `kqI1DTcwKX90ZtAy` 展开的结果与 SDK 里硬编码的 11 组轮密钥逐字相同 ——
+ * 第 0 轮本身就是主密钥的 ASCII 字节（`6b714931 44546377 4b583930 5a744179`）。
+ * @param masterKey - 16 字节主密钥
+ * @returns 11 组轮密钥，每组 4 个 32 位字；末组即末轮密钥
+ */
+export function expandXrapKey (masterKey: Buffer): Array<[number, number, number, number]> {
+  if (masterKey.length !== 16) {
+    throw new Error(`x-rap master key must be 16 bytes, got ${masterKey.length}`)
+  }
+
+  const subWord = (w: number): number =>
+    ((SBOX[(w >>> 24) & 0xFF] << 24) | (SBOX[(w >>> 16) & 0xFF] << 16) | (SBOX[(w >>> 8) & 0xFF] << 8) | SBOX[w & 0xFF]) >>> 0
+  const rotWord = (w: number): number => ((w << 8) | (w >>> 24)) >>> 0
+
+  const words: number[] = []
+  for (let i = 0; i < 4; i++) words.push(masterKey.readUInt32BE(i * 4))
+  for (let i = 4; i < 44; i++) {
+    let temp = words[i - 1]
+    if (i % 4 === 0) temp = (subWord(rotWord(temp)) ^ (RCON[i / 4 - 1] << 24)) >>> 0
+    words.push((words[i - 4] ^ temp) >>> 0)
+  }
+
+  return Array.from({ length: 11 }, (_, r) =>
+    words.slice(r * 4, r * 4 + 4).map((w) => w >>> 0) as [number, number, number, number])
+}
+
+const EXPANDED_KEYS = expandXrapKey(Buffer.from(cfg.XRAP_MASTER_KEY, 'ascii'))
+const ROUND_KEYS: ReadonlyArray<readonly [number, number, number, number]> = EXPANDED_KEYS.slice(0, 10)
+const LAST_ROUND_KEY: readonly [number, number, number, number] = EXPANDED_KEYS[10]
+const LAST_ROUND_KEY_BYTES = (() => {
+  const b = Buffer.alloc(16)
+  for (let i = 0; i < 4; i++) {
+    b.writeUInt32BE(LAST_ROUND_KEY[i] >>> 0, i * 4)
+  }
+  return b
+})()
 
 // --- GF(2^8) helpers for T-table generation ---
 

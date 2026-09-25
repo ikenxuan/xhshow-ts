@@ -70,6 +70,7 @@ jobs:
       - name: 🔨 执行项目构建
         id: build-package
         run: |
+          pnpm test
           pnpm build
           pnpm pkg delete devDependencies
           mkdir -p ${{ runner.temp }}/temp/
@@ -150,6 +151,7 @@ jobs:
 
       - name: 🔨 执行项目构建
         run: |
+          pnpm test
           pnpm build
           if [ $? -ne 0 ]; then
             echo "❌ 构建失败！" >> $GITHUB_STEP_SUMMARY
