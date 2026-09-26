@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/ikenxuan/xhshow-ts/compare/v1.1.0...v1.2.0) (2026-09-25)
+
+
+### ✨ 新功能
+
+* align XHS signature protocol (x-s-common, platform fields, XYS x4-x7) ([#9](https://github.com/ikenxuan/xhshow-ts/issues/9)) ([eb02ad9](https://github.com/ikenxuan/xhshow-ts/commit/eb02ad985d7ce58766855f9788af47ab4a7c7c42))
+
 ## [1.1.0](https://github.com/ikenxuan/xhshow-ts/compare/v1.0.6...v1.1.0) (2026-09-19)
 
 
