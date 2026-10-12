@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/ikenxuan/xhshow-ts/compare/v1.2.0...v1.2.1) (2026-10-12)
+
+
+### 🐛 错误修复
+
+* b1 按浏览器格式编码，并支持复用会话 b1 ([#11](https://github.com/ikenxuan/xhshow-ts/issues/11)) ([b138a4b](https://github.com/ikenxuan/xhshow-ts/commit/b138a4bf195cdc8f0902022f3043e070157951f4))
+
 ## [1.2.0](https://github.com/ikenxuan/xhshow-ts/compare/v1.1.0...v1.2.0) (2026-09-25)
 
 
