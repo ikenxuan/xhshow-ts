@@ -25,7 +25,8 @@ test('buildSskProof matches an independently computed vector', () => {
   // x6 = sha1(md5 ‖ x7) 独立算出
   const proof = buildSskProof('0123456789abcdef0123456789abcdef', { 'xhs-pc-web': SSK }, new Uint8Array([1, 2, 3, 4]))
 
-  assert.deepEqual(proof, {
+  assert.ok(proof)
+  assert.deepEqual({ x6: { ...proof.x6 }, x7: { ...proof.x7 } }, {
     x6: { 'xhs-pc-web': 'uSE+IMqd6IfdntT+kqUKmrUPlUU=' },
     x7: { 'xhs-pc-web': 'AQIDBOtFX6WD3D95chxCB0MP/uB59yIxICEiIyQlJicoKSorLC0uLw==' }
   })

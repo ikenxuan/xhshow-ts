@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { CryptoConfig } from './config'
-import { CryptoProcessor, XsCommonSigner, buildSskProof, buildXywPayloadHex, xRapParam } from './core'
+import { CryptoProcessor, XsCommonSigner, buildSskProof, buildXywPayloadHex, xRapParam, type XsCommonOptions } from './core'
 import { RandomGenerator, extractUri, buildUrl, getShardingKey } from './utils'
 import { SessionManager, type SignState } from './session'
 import {
@@ -160,8 +160,8 @@ export class Xhshow {
   /**
    * 生成 XYW_ 格式签名（AES-128-CBC 加密）
    *
-   * 数据获取类接口（user_posted、otherinfo 等）自 2026 年 3 月起会以 HTTP 406
-   * 拒绝传统 XYS_ 格式，此时需改用 XYW_ 格式。它使用独立于 signXs 的加密路径。
+   * 使用独立于 signXs 的加密路径。签名格式由调用方显式选择，
+   * 不根据登录态或 HTTP 406/461 自动切换。
    *
    * @param method - HTTP 请求方法，'GET' 或 'POST'
    * @param uri - 请求 URI 路径（可以是完整 URL）
@@ -208,12 +208,13 @@ export class Xhshow {
   /**
    * 生成 x-s-common 签名
    * @param cookieDict - Cookie 字典对象或 Cookie 字符串
+   * @param options - 同一会话的 b1；省略时保留原有生成行为
    * @returns x-s-common 签名字符串
    */
-  signXsCommon (cookieDict: Record<string, any> | string): string {
+  signXsCommon (cookieDict: Record<string, any> | string, options: XsCommonOptions = {}): string {
     const parsedCookies = this.parseCookies(cookieDict)
     const signer = new XsCommonSigner(this.config)
-    return signer.sign(parsedCookies)
+    return signer.sign(parsedCookies, options)
   }
 
   /**
@@ -263,11 +264,12 @@ export class Xhshow {
   /**
    * 生成 x-s-common 签名的便捷包装方法
    * @param cookieDict - Cookie 字典对象或 Cookie 字符串
+   * @param options - 同一会话的 b1；省略时保留原有生成行为
    * @returns x-s-common 签名字符串
    */
-  signXsc (cookieDict: Record<string, any> | string): string {
+  signXsc (cookieDict: Record<string, any> | string, options: XsCommonOptions = {}): string {
     validateXsCommonParams(cookieDict)
-    return this.signXsCommon(cookieDict)
+    return this.signXsCommon(cookieDict, options)
   }
 
   /**
@@ -472,7 +474,8 @@ export class Xhshow {
       ? this.signXyw(methodUpper, uri, a1Value, xsecAppid, requestData, timestamp)
       : this.signXs(methodUpper, uri, a1Value, xsecAppid, requestData, timestamp, session)
 
-    const xSCommon = this.signXsCommon(cookieDict)
+    // 只取 b1：SessionManager 恰好结构兼容 XsCommonOptions，但整个会话对象不是这里的参数
+    const xSCommon = this.signXsCommon(cookieDict, { b1: session?.b1 })
     const xT = this.getXT(timestamp)
     const xB3Traceid = this.getB3TraceId()
     const xXrayTraceid = this.getXrayTraceId(Math.floor(timestamp * 1000))

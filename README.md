@@ -79,11 +79,44 @@ const headers = client.signHeadersGet(
 // headers 包含: x-s, x-s-common, x-t, x-b3-traceid, x-xray-traceid, x-mns, xy-direction
 ```
 
-### XYW 签名格式（数据接口绕过 HTTP 406）
+### 复用会话中的 b1
 
-自 2026 年 3 月起，数据获取类接口（如 `user_posted`、`user/otherinfo` 等）会以
-HTTP 406 拒绝传统的 XYS_ 格式签名，需改用基于 AES-128-CBC 的 XYW_ 格式。通过
-`signFormat: 'xyw'` 启用：
+已有同一会话的 Cookie 与 b1 时，可以直接计算 `x-s-common`，不需要重新生成指纹：
+
+```typescript
+import { CryptoConfig, SessionManager, Xhshow } from '@ikenxuan/xhshow-ts'
+
+// 由调用方提供同一会话的材料，不要写入日志。
+declare const cookie: string
+declare const b1: string
+declare const userAgent: string
+declare const webSsk: string | Record<string, string> | undefined
+
+const config = new CryptoConfig().forUserAgent(userAgent)
+const client = new Xhshow(config)
+const common = client.signXsCommon(cookie, { b1 })
+// signXsc(cookie, { b1 }) 与 XsCommonSigner.sign(cookieDict, { b1 }) 同样支持。
+
+const session = new SessionManager(config, { b1, webSsk })
+const headers = client.signHeadersGet(
+  '/api/sns/web/v1/user_posted', cookie, 'xhs-pc-web',
+  { num: '30', cursor: '', user_id: '...' }, undefined, session
+)
+```
+
+显式 b1 原样写入 `x8`，`x9` 使用前端 CRC32 变体计算；这条分支不调用指纹生成器。
+空串、纯空白或非字符串会报错，不会自动替换。省略 b1 或调用 `session.setB1(undefined)`
+保留原有生成行为；`session.setB1(value)` 可更新会话值。
+
+以上调用只在本地计算，不启动浏览器，也不发送请求。Cookie、b1、webSsk 与 User-Agent
+应来自同一会话，库不会替调用方判断它们是否配对。b1 不包含完整 webprofile，也不能推导出 SSK。
+前端由 `realTimeCommonPatch` 配置命中的接口可能改用 `getCurMiniUa` 的结果作为 x8，
+不能把保存的 b1 视作所有接口的实时指纹。
+
+### XYW 签名格式
+
+`signXyw` 使用独立的 AES-128-CBC 路径，通过 `signFormat: 'xyw'` 显式启用。
+XYS 是默认格式；不要仅凭登录态或 HTTP 406/461 自动切换格式：
 
 ```typescript
 // 直接生成 XYW_ 签名
@@ -172,7 +205,7 @@ const requestId = client.getSearchRequestId()     // "{random}-{timestamp_ms}"
 
 ### 使用会话管理（推荐）
 
-会话管理器可以模拟真实用户在同一页面中的连续操作，生成更真实的签名，提高长期稳定性：
+会话管理器在连续请求间维护页面加载时间戳与计数器，也可保存调用方提供的 b1 和 SSK：
 
 ```typescript
 import { Xhshow, SessionManager } from '@ikenxuan/xhshow-ts'
@@ -200,9 +233,8 @@ const headers2 = client.signHeadersGet(
   session  // 使用同一个会话管理器
 )
 
-// 会话管理器的工作原理：
-// - 无 Session：每次请求生成随机参数，可能被识别为机器人
-// - 有 Session：维护固定的页面加载时间戳和单调递增的计数器，模拟真实用户行为
+// 同一个 session 维护固定的页面加载时间戳和递增计数器。
+// 不同 Cookie 会话应使用不同的 SessionManager；这不保证服务端接受请求。
 ```
 
 ### XYS 字段（x4~x7）与会话 SSK
@@ -210,15 +242,15 @@ const headers2 = client.signHeadersGet(
 `signXs` 按前端 `seccore_signv2` 输出 `x0~x5`，会话带 webSsk 时再加 `x6/x7`：
 
 | 字段 | 含义 |
-|------|------|
+| ------ | ------ |
 | `x0` / `x1` / `x2` | 签名版本 `4.4.3` / 应用 ID / 平台名（随 `forUserAgent` 变） |
 | `x3` | mnsv2 签名（`mns0301_` 档位，明文布局见下） |
 | `x4` | 请求体类型：POST 为 `'object'`，GET 为 `''` |
 | `x5` | 签名内容串（URI + 查询串或 JSON 请求体）的 MD5 |
 | `x6` / `x7` | 会话 SSK 证明，按 appId 分键：`x7 = nonce(4) ‖ sha1(ssk ‖ nonce) ‖ ssk[32:]`，`x6 = sha1(md5 ‖ x7)` |
 
-x4~x7 已与页面自己签出的 21 条 `XYS_` 逐字节核对一致；登录态下
-homefeed、评论翻页、子评论在带与不带 x4~x7 时均正常返回。服务端目前不强制 x6/x7。
+SSK 证明需要与请求 x5 和当前会话密钥一致。字段算法的离线对照不等于请求已通过服务端校验；
+HTTP 406/461 等非成功状态仍应作为失败处理，不能仅凭响应体中的业务码判断成功。
 
 x3 解密后是 144 字节明文，2026-09-26 与页面签出的 20 条 x3 逐字段核对：内容 MD5 段为
 `md5(内容)[0:8]`，a3 段为 `dsf(le64(时间戳) ‖ md5(URI))`，两者都逐字节异或版本字段的低字节；
@@ -234,15 +266,15 @@ const session = new SessionManager(undefined, { webSsk: '{"xhs-pc-web":"..."}' }
 const headers = client.signHeadersPost('/api/sns/web/v1/homefeed', cookies, 'xhs-pc-web', body, undefined, session)
 ```
 
-也可以在登录时自己换一份。前端只在登录类接口（`SSK_ISSUE_APIS`：扫码状态、验证码登录等）
-的请求里带上客户端公钥，游客会话和已登录会话调 `login/activate` 都不会下发：
+也可以通过 `webprofile` 或登录类接口交换 SSK。`webprofile` 的客户端公钥放在 `ext.cpk`，
+`activate` 的 HTTP 请求体字段为 `client_public_key_base64`。是否下发密文以本次响应为准：
 
 ```typescript
 import { CryptoConfig, createWebSskExchange, extractEncryptedSsk } from '@ikenxuan/xhshow-ts'
 
 const exchange = createWebSskExchange(new CryptoConfig().SSK_SERVER_PUBLIC_KEY)
-// POST 放进请求体，GET 放进同名 query 参数
-const res = await post('/api/sns/web/v1/login/qrcode/status', { ...body, clientPublicKeyBase64: exchange.clientPublicKeyBase64 })
+// post 代表调用方的签名与发送函数，公钥必须在签名前加入请求体。
+const res = await post('/api/sns/web/v1/login/activate', { ...body, client_public_key_base64: exchange.clientPublicKeyBase64 })
 const encrypted = extractEncryptedSsk(res)
 if (encrypted) session.setWebSsk({ 'xhs-pc-web': exchange.acceptEncryptedSsk(encrypted) })
 ```
@@ -291,23 +323,24 @@ const getSignature = client.signXsGet(
 ### 签名方法
 
 | 方法 | 说明 |
-|------|------|
+| ------ | ------ |
 | `signXs(method, uri, a1Value, xsecAppid?, payload?, timestamp?, session?)` | 通用签名（XYS_ 格式） |
 | `signXsGet(uri, a1Value, xsecAppid?, params?, timestamp?, session?)` | GET 请求签名 |
 | `signXsPost(uri, a1Value, xsecAppid?, payload?, timestamp?, session?)` | POST 请求签名 |
-| `signXyw(method, uri, a1Value, xsecAppid?, payload?, timestamp?)` | XYW_ 格式签名（AES-128-CBC，绕过数据接口 406） |
-| `signXsc(cookieDict)` | 生成 x-s-common 签名 |
+| `signXyw(method, uri, a1Value, xsecAppid?, payload?, timestamp?)` | XYW_ 格式签名（AES-128-CBC） |
+| `signXsCommon(cookieDict, options?)` / `signXsc(cookieDict, options?)` | 生成 x-s-common，`options.b1` 可复用会话值 |
 
 ### 请求头生成
 
 | 方法 | 说明 |
-|------|------|
+| ------ | ------ |
 | `signHeaders(method, uri, cookies, xsecAppid?, params?, payload?, timestamp?, session?, signFormat?, userId?, xRap?)` | 生成完整请求头 |
 | `signHeadersGet(uri, cookies, xsecAppid?, params?, timestamp?, session?, signFormat?, userId?, xRap?)` | GET 请求头 |
 | `signHeadersPost(uri, cookies, xsecAppid?, payload?, timestamp?, session?, signFormat?, userId?, xRap?)` | POST 请求头 |
 
 参数说明：
-- `signFormat`：`'xys'`（默认）或 `'xyw'`（数据接口需用，绕过 HTTP 406）
+
+- `signFormat`：`'xys'`（默认）或 `'xyw'`（显式选择，不按 HTTP 状态自动切换）
 - `userId`：可选，提供后按 user_id 计算 `xy-direction` 分片值，否则随机
 - `xRap`：是否生成 `x-rap-param` 请求头（feed、搜索、发布类接口需要）
 
@@ -316,16 +349,17 @@ const getSignature = client.signXsGet(
 ### 会话管理
 
 | 类/方法 | 说明 |
-|------|------|
-| `SessionManager` | 会话管理器类，`new SessionManager(config?, { webSsk? })` |
+| ------ | ------ |
+| `SessionManager` | 会话管理器类，`new SessionManager(config?, { webSsk?, b1? })` |
 | `session.getCurrentState(content)` | 获取当前签名状态 |
 | `session.updateState()` | 更新会话状态 |
 | `session.setWebSsk(webSsk)` | 替换会话 SSK（JSON 字符串或映射，传空清除） |
+| `session.setB1(b1)` | 替换会话 b1，`undefined` 恢复缺省生成行为 |
 
 ### 会话 SSK 与浏览器搜索
 
 | 方法 | 说明 |
-|------|------|
+| ------ | ------ |
 | `buildSskProof(contentMd5, webSsk, nonce?)` | 计算 x6/x7，没有可用 SSK 时返回 `null` |
 | `parseWebSsk(value)` | 把 localStorage 的 webSsk 统一成 appId → base64 映射 |
 | `createWebSskExchange(serverPublicKey)` | 发起一次 X25519 交换，返回客户端公钥与解密函数 |
@@ -338,7 +372,7 @@ const getSignature = client.signXsGet(
 ### 工具方法
 
 | 方法 | 说明 |
-|------|------|
+| ------ | ------ |
 | `decodeXs(xsSignature)` | 解密 XYS 签名 |
 | `decodeX3(x3Signature)` | 解密 x3 签名 |
 | `buildUrl(baseUrl, params?)` | 构建带参数的 URL |
@@ -357,6 +391,11 @@ const getSignature = client.signXsGet(
 type Method = 'GET' | 'POST'
 type Payload = Record<string, any> | null
 type SignFormat = 'xys' | 'xyw'
+type WebSsk = Record<string, string>
+
+interface XsCommonOptions {
+  readonly b1?: string
+}
 
 interface SignState {
   pageLoadTimestamp: number
@@ -366,9 +405,13 @@ interface SignState {
 }
 
 class SessionManager {
-  constructor(config?: CryptoConfig)
+  constructor(config?: CryptoConfig, options?: { webSsk?: string | WebSsk | null; b1?: string })
+  webSsk: WebSsk
+  b1?: string
+  setWebSsk(webSsk: string | WebSsk | null | undefined): void
+  setB1(b1: string | undefined): void
   updateState(): void
-  getCurrentState(content: string): SignState
+  getCurrentState(uri: string): SignState
 }
 
 interface Xhshow {
@@ -376,7 +419,8 @@ interface Xhshow {
   signXsGet(uri: string, a1Value: string, xsecAppid?: string, params?: Payload, timestamp?: number, session?: SessionManager): string
   signXsPost(uri: string, a1Value: string, xsecAppid?: string, payload?: Payload, timestamp?: number, session?: SessionManager): string
   signXyw(method: Method, uri: string, a1Value: string, xsecAppid?: string, payload?: Payload, timestamp?: number, session?: SessionManager): string
-  signXsc(cookieDict: Record<string, any> | string): string
+  signXsCommon(cookieDict: Record<string, any> | string, options?: XsCommonOptions): string
+  signXsc(cookieDict: Record<string, any> | string, options?: XsCommonOptions): string
   signHeaders(method: Method, uri: string, cookies: Record<string, any> | string, xsecAppid?: string, params?: Payload, payload?: Payload, timestamp?: number, session?: SessionManager, signFormat?: SignFormat, userId?: string | null, xRap?: boolean): Record<string, string>
   signHeadersGet(uri: string, cookies: Record<string, any> | string, xsecAppid?: string, params?: Payload, timestamp?: number, session?: SessionManager, signFormat?: SignFormat, userId?: string | null, xRap?: boolean): Record<string, string>
   signHeadersPost(uri: string, cookies: Record<string, any> | string, xsecAppid?: string, payload?: Payload, timestamp?: number, session?: SessionManager, signFormat?: SignFormat, userId?: string | null, xRap?: boolean): Record<string, string>
@@ -421,7 +465,7 @@ pnpm build
 
 ### 项目结构
 
-```
+```text
 src/
 ├── client.ts          # 主客户端类
 ├── session.ts         # 会话管理器

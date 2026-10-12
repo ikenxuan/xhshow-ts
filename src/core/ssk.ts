@@ -38,6 +38,13 @@ const GCM_TAG_LENGTH = 16
 
 const sha1 = (data: Buffer): Buffer => createHash('sha1').update(data).digest()
 
+function decodeStandardBase64 (value: unknown): Buffer {
+  if (typeof value !== 'string' || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
+    throw new Error('Invalid Base64 value')
+  }
+  return Buffer.from(value, 'base64')
+}
+
 /**
  * 把 webSsk 统一成 appId → base64 映射。
  *
@@ -47,10 +54,8 @@ const sha1 = (data: Buffer): Buffer => createHash('sha1').update(data).digest()
  * @returns appId → SSK（base64）
  */
 export function parseWebSsk (value: string | WebSsk | null | undefined): WebSsk {
-  if (!value) return {}
-  if (typeof value !== 'string') return { ...value }
   try {
-    const parsed: unknown = JSON.parse(value)
+    const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...(parsed as WebSsk) } : {}
   } catch {
     return {}
@@ -85,10 +90,15 @@ export function buildSskProof (contentMd5: string, webSsk: WebSsk, nonce?: Uint8
     throw new Error(`nonce must be ${NONCE_LENGTH} bytes`)
   }
 
-  const x6: Record<string, string> = {}
-  const x7: Record<string, string> = {}
+  const x6: Record<string, string> = Object.create(null)
+  const x7: Record<string, string> = Object.create(null)
   for (const [appId, value] of Object.entries(webSsk)) {
-    const ssk = typeof value === 'string' ? Buffer.from(value, 'base64') : Buffer.alloc(0)
+    let ssk: Buffer
+    try {
+      ssk = decodeStandardBase64(value)
+    } catch {
+      continue
+    }
     if (!appId || ssk.length < SSK_MIN_LENGTH) continue
 
     const v = nonce ? Buffer.from(nonce) : createNonce()
@@ -102,7 +112,8 @@ export function buildSskProof (contentMd5: string, webSsk: WebSsk, nonce?: Uint8
 /**
  * 前端会带上客户端公钥的登录类接口（前端 `sskInterceptor` 的白名单）。
  *
- * POST 放进请求体 `clientPublicKeyBase64`，GET 放进同名 query 参数；
+ * 拦截器内部用 `clientPublicKeyBase64`；实际 HTTP 字段需遵循接口序列化，
+ * 例如 activate 请求体中的 `client_public_key_base64`。
  * 响应里的密文按 {@link extractEncryptedSsk} 的顺序查找。
  */
 export const SSK_ISSUE_APIS: readonly string[] = [
@@ -144,7 +155,7 @@ export function extractEncryptedSsk (response: unknown): string | undefined {
 
 /** {@link createWebSskExchange} 的返回值。 */
 export interface WebSskExchange {
-  /** 客户端 X25519 公钥（标准 base64），登录类接口放 `clientPublicKeyBase64`，webprofile 放 `ext.cpk` */
+  /** 客户端 X25519 公钥（标准 base64），activate 放 `client_public_key_base64`，webprofile 放 `ext.cpk` */
   clientPublicKeyBase64: string
   /**
    * 解开服务端下发的 SSK 密文（可用 {@link extractEncryptedSsk} 从响应里取）。
@@ -157,18 +168,16 @@ export interface WebSskExchange {
 /**
  * 发起一次 webSsk 交换。
  *
- * 前端有两个入口：一是 {@link SSK_ISSUE_APIS} 里的登录类接口，请求里带上
- * `clientPublicKeyBase64`；二是 webprofile 上报在本地没有 SSK 时带上
- * `ext: { cpk }`。密文是 `nonce(12) ‖ 密文 ‖ tag(16)`，用 X25519 共享密钥
- * 直接当 AES-256-GCM 密钥解开。
+ * 前端有两个入口：{@link SSK_ISSUE_APIS} 里的登录类接口，以及 webprofile
+ * 上报的 `ext: { cpk }`。activate 的 HTTP 请求体字段为 `client_public_key_base64`。
+ * 密文是 `nonce(12) ‖ 密文 ‖ tag(16)`，用 X25519 共享密钥直接当 AES-256-GCM 密钥。
  *
- * 2026-09-25 真机：游客与已登录会话调 `login/activate`、webprofile 带 `ext.cpk`
- * 都只回 code 0、不下发 SSK（浏览器自己的 webprofile 也一样），SSK 只在真正的
- * 登录动作（扫码 / 验证码）里下发。服务端目前也不强制 x6/x7，不带照常 200。
+ * 是否下发 SSK 以本次响应为准；缺少密文不能视为已完成交换。
+ * 同一交换对象只应用于携带其公钥的那次请求，不能跨请求混用临时私钥。
  *
  * ```ts
  * const exchange = createWebSskExchange(config.SSK_SERVER_PUBLIC_KEY)
- * const res = await post('/api/sns/web/v1/login/qrcode/status', { ...body, clientPublicKeyBase64: exchange.clientPublicKeyBase64 })
+ * const res = await post('/api/sns/web/v1/login/activate', { ...body, client_public_key_base64: exchange.clientPublicKeyBase64 })
  * const encrypted = extractEncryptedSsk(res)
  * if (encrypted) session.setWebSsk({ 'xhs-pc-web': exchange.acceptEncryptedSsk(encrypted) })
  * ```
@@ -176,7 +185,7 @@ export interface WebSskExchange {
  * @returns 客户端公钥与解密函数
  */
 export function createWebSskExchange (serverPublicKeyBase64: string): WebSskExchange {
-  const serverRaw = Buffer.from(serverPublicKeyBase64, 'base64')
+  const serverRaw = decodeStandardBase64(serverPublicKeyBase64)
   if (serverRaw.length !== 32) throw new Error('server public key must be 32 bytes')
   const serverKey = createPublicKey({
     key: { kty: 'OKP', crv: 'X25519', x: serverRaw.toString('base64url') },
@@ -189,7 +198,7 @@ export function createWebSskExchange (serverPublicKeyBase64: string): WebSskExch
   return {
     clientPublicKeyBase64: clientRaw.toString('base64'),
     acceptEncryptedSsk (encryptedSsk: string): string {
-      const data = Buffer.from(encryptedSsk, 'base64')
+      const data = decodeStandardBase64(encryptedSsk)
       if (data.length < GCM_NONCE_LENGTH + GCM_TAG_LENGTH) throw new Error('encrypted SSK is too short')
 
       const shared = diffieHellman({ privateKey, publicKey: serverKey })

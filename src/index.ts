@@ -1,6 +1,6 @@
 export { Xhshow } from './client'
 export { CryptoProcessor, XsCommonSigner, CRC32, XywCipher, buildXywPayloadHex, xRapParam, expandXrapKey, SSK_ISSUE_APIS, buildSskProof, createWebSskExchange, extractEncryptedSsk, parseWebSsk } from './core'
-export type { XRapParamOptions, SskProof, WebSsk, WebSskExchange } from './core'
+export type { XRapParamOptions, SskProof, WebSsk, WebSskExchange, XsCommonOptions } from './core'
 export { CryptoConfig } from './config'
 export { a1PlatformDigit, getPlatformCode, platformFromUserAgent, PLATFORM_CODE, XHS_PLATFORM_FALLBACK, XYW_ENV_FLAGS_BROWSER } from './config'
 export type { XhsPlatform } from './config'

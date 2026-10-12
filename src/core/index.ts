@@ -1,5 +1,6 @@
 export { CryptoProcessor } from './crypto'
 export { XsCommonSigner } from './commonSign'
+export type { XsCommonOptions } from './commonSign'
 export { CRC32 } from './crc32'
 export { XywCipher, buildXywPayloadHex } from './xywCrypto'
 export { xRapParam, encryptBlock16, encryptSessionKey, expandXrapKey } from './xrap'

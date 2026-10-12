@@ -6,29 +6,37 @@ import { CryptoConfig } from '../config'
 import { CRC32 } from './crc32'
 import { FingerprintGenerator } from '../generators/fingerprint'
 import { Base64Encoder } from '../utils/encoder'
+import { validateB1 } from '../utils/b1'
+
+export interface XsCommonOptions {
+  /** 同一 Cookie 会话保存的 b1，原样写入 x8；省略时保留原有生成行为。 */
+  readonly b1?: string
+}
 
 export class XsCommonSigner {
   private config: CryptoConfig
-  private fpGenerator: FingerprintGenerator
   private encoder: Base64Encoder
 
   constructor (config?: CryptoConfig) {
     this.config = config || new CryptoConfig()
-    this.fpGenerator = new FingerprintGenerator(this.config)
     this.encoder = new Base64Encoder(this.config)
   }
 
   /**
    * Generate x-s-common signature
    */
-  sign (cookieDict: Record<string, string>): string {
+  sign (cookieDict: Record<string, string>, options: XsCommonOptions = {}): string {
     const a1Value = cookieDict.a1
     if (!a1Value) {
       throw new Error("Missing 'a1' in cookies")
     }
 
-    const fingerprint = this.fpGenerator.generate(cookieDict, this.config.PUBLIC_USERAGENT)
-    const b1 = this.fpGenerator.generateB1(fingerprint)
+    let b1 = options.b1
+    validateB1(b1)
+    if (b1 === undefined) {
+      const fpGenerator = new FingerprintGenerator(this.config)
+      b1 = fpGenerator.generateB1(fpGenerator.generate(cookieDict, this.config.PUBLIC_USERAGENT))
+    }
 
     const x9 = CRC32.crc32JsInt(b1)
 

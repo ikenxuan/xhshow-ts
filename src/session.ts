@@ -1,5 +1,6 @@
 import { CryptoConfig } from './config'
 import { parseWebSsk, type WebSsk } from './core/ssk'
+import { validateB1 } from './utils/b1'
 
 /**
  * Immutable state for a single signing operation
@@ -33,14 +34,17 @@ export class SessionManager {
    * `createWebSskExchange` 在 webprofile 上报时自己换一份。
    */
   webSsk: WebSsk
+  /** 与 Cookie、webSsk 同属一个会话的 b1，由 signHeaders 用于 x-s-common。 */
+  b1?: string
 
   /**
    * @param config - 可选的加密配置
-   * @param options - 可选的会话状态；`webSsk` 可传 JSON 字符串或映射对象
+   * @param options - 同一会话的 b1 与 webSsk；webSsk 可传 JSON 字符串或映射对象
    */
-  constructor (config?: CryptoConfig, options: { webSsk?: string | WebSsk | null } = {}) {
+  constructor (config?: CryptoConfig, options: { webSsk?: string | WebSsk | null; b1?: string } = {}) {
     this.config = config || new CryptoConfig()
     this.webSsk = parseWebSsk(options.webSsk)
+    this.setB1(options.b1)
     this.pageLoadTimestamp = Math.floor(Date.now())
     this.sequenceValue = this.randomInt(
       this.config.SESSION_SEQUENCE_INIT_MIN,
@@ -62,6 +66,12 @@ export class SessionManager {
    */
   setWebSsk (webSsk: string | WebSsk | null | undefined): void {
     this.webSsk = parseWebSsk(webSsk)
+  }
+
+  /** 替换 b1；undefined 恢复缺省生成行为。 */
+  setB1 (b1: string | undefined): void {
+    validateB1(b1)
+    this.b1 = b1
   }
 
   /**
